@@ -547,7 +547,7 @@ function viewPlan(){
       <div><dt>처음 예상한 합계</dt><dd class="muted">${won(C.fixedEst)}</dd></div>
       <div><dt>지금 반영된 합계 ${diff?`<span class="tag ${diff>0?'bad':'ok'}">예상보다 ${diff>0?'+':'−'}${won(Math.abs(diff))}</span>`:''}</dt><dd>${won(C.fixedEff)}</dd></div>
     </dl>
-    <p class="hint">금액이 확정되면 칸에 실제 금액을 넣으세요. 비어 있으면 예상 금액으로 계산해요.</p>
+    <p class="hint">실제 금액을 칸에 넣고 ‘이 금액으로 확정’을 누르세요. 예상과 같으면 ‘예상대로 확정’만 누르면 돼요. 확정 전에는 예상 금액으로 계산해요.</p>
     <div class="list" style="margin-top:4px">`+
     M.fixed.slice().sort((a,b)=>(a.day||99)-(b.day||99)).map(f=>{
       const done=f.act!=null;const d=done?f.act-f.est:0;
@@ -556,8 +556,8 @@ function viewPlan(){
           <div class="row-main"><b>${esc(f.name)}</b><span>예상 ${won(f.est)}원${done&&d?` · <span class="${d>0?'bad':'good'}">${d>0?'+':'−'}${won(Math.abs(d))}</span>`:''}</span></div>
           <span class="tag ${done?'ok':'warn'}">${done?'확정':'예상'}</span>
           <button type="button" class="mini" data-act="edit-fix" data-id="${f.id}">편집</button></div>
-        <div class="fx-bot"><div class="in-wrap"><input class="in num" id="act-${f.id}" inputmode="numeric" aria-label="${esc(f.name)} 확정 금액" placeholder="확정 금액 입력" data-fixact="${f.id}" value="${done?won(f.act):''}"><span class="unit">원</span></div>
-          ${done?`<button type="button" class="mini" data-act="clear-act" data-id="${f.id}">확정 취소</button>`:`<button type="button" class="mini accent" data-act="confirm-est" data-id="${f.id}">예상대로 확정</button>`}</div>
+        <div class="fx-bot"><div class="in-wrap"><input class="in num" id="act-${f.id}" inputmode="numeric" aria-label="${esc(f.name)} 확정 금액" placeholder="실제 금액 입력" enterkeyhint="done" data-fixact="${f.id}" data-saved="${done?f.act:''}" value="${done?won(f.act):''}"><span class="unit">원</span></div>
+          <button type="button" class="mini ${done?'':'accent'}" id="actbtn-${f.id}" data-act="${done?'clear-act':'save-act'}" data-id="${f.id}">${done?'확정 취소':'예상대로 확정'}</button></div>
       </div>`;}).join('')+
     `</div><button type="button" class="add-line" data-act="add-fix">+ 고정비 추가</button></section>`;
   h+=`<section class="card"><h2>이 달 계획 다시 만들기</h2><p class="note" style="margin-bottom:12px">수입·고정비·하루 예산을 설정의 기본값으로 되돌려요. 지출 기록은 그대로 남아요.</p>
@@ -749,8 +749,12 @@ document.addEventListener('click',e=>{
     case 'add-fix':openFixed(curKey,null);break;
     case 'edit-tpl':openFixed('tpl',id);break;
     case 'add-tpl':openFixed('tpl',null);break;
-    case 'confirm-est':mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=f.est;});toast('예상 금액으로 확정했어요.');break;
-    case 'clear-act':mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=null;});break;
+    case 'save-act':{
+      clearTimeout(commitTimers['act-'+id]);
+      const inp=document.getElementById('act-'+id);const n=inp?parseNum(inp.value):null;
+      mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n??f.est;});
+      toast(n==null?'예상 금액으로 확정했어요.':`${won(n)}원으로 확정했어요.`);break;}
+    case 'clear-act':clearTimeout(commitTimers['act-'+id]);mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=null;});toast('확정을 취소했어요. 예상 금액으로 계산해요.');break;
     case 'sheet-del':if(armed(b)&&form._del)form._del();break;
     case 'reset-month':if(armed(b)){const exp=clone(getMonth(curKey).exp);const fresh=draftFrom(curKey);mutateMonth(curKey,M=>{M.income=fresh.income;M.fixed=fresh.fixed;M.daily=fresh.daily;M.exp=exp;});toast('설정값으로 되돌렸어요.');}break;
     case 'use-local':Store.useLocal();break;
@@ -770,12 +774,36 @@ document.addEventListener('input',e=>{
   const el=e.target;if(!el.classList||!el.classList.contains('num'))return;
   if(el.dataset.s==='day'||el.id==='uPayday'||el.id==='sPayday'||el.id==='iDay'||el.id==='fDay'){el.value=el.value.replace(/[^\d]/g,'').slice(0,2);return;}
   const n=parseNum(el.value);el.value=n==null?'':n.toLocaleString('ko-KR');
+  if(el.dataset.fixact)syncActBtn(el);
 });
+// the button next to a fixed-cost amount follows what is typed
+function syncActBtn(el){
+  const btn=document.getElementById('actbtn-'+el.dataset.fixact);if(!btn)return;
+  const n=parseNum(el.value);const saved=el.dataset.saved===''?null:Number(el.dataset.saved);
+  let act,label,accent=true;
+  if(n!=null&&n!==saved){act='save-act';label=saved==null?'이 금액으로 확정':'수정 확정';}
+  else if(saved!=null){act='clear-act';label='확정 취소';accent=false;}
+  else{act='save-act';label='예상대로 확정';}
+  btn.dataset.act=act;btn.textContent=label;btn.classList.toggle('accent',accent);
+}
+document.addEventListener('keydown',e=>{
+  const el=e.target;if(e.key!=='Enter'||!el.dataset||!el.dataset.fixact)return;
+  e.preventDefault();const btn=document.getElementById('actbtn-'+el.dataset.fixact);
+  if(btn&&btn.dataset.act==='save-act')btn.click();else el.blur();
+});
+// commits from leaving a field wait a moment, so a tap on a button is not swallowed by the re-render
+const commitTimers={};
+function later(key,fn){clearTimeout(commitTimers[key]);commitTimers[key]=setTimeout(fn,350);}
 // commit edits
 document.addEventListener('change',e=>{
   const el=e.target;
-  if(el.dataset.field==='daily'){const n=parseNum(el.value)||0;mutateMonth(curKey,M=>{M.daily=n});return;}
-  if(el.dataset.fixact){const id=el.dataset.fixact;const n=parseNum(el.value);mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n;});if(n!=null)toast('확정 금액을 반영했어요.');return;}
+  if(el.dataset.field==='daily'){const n=parseNum(el.value)||0;const key=curKey;later('daily',()=>mutateMonth(key,M=>{M.daily=n}));return;}
+  if(el.dataset.fixact){
+    const id=el.dataset.fixact;const n=parseNum(el.value);const key=curKey;
+    const saved=el.dataset.saved===''?null:Number(el.dataset.saved);
+    if(n===saved||n==null)return;
+    later('act-'+id,()=>{mutateMonth(key,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n;});toast(`${won(n)}원으로 확정했어요.`);});
+    return;}
   if(el.dataset.set){
     const k=el.dataset.set;let v=k==='startDay'?Number(el.value):parseNum(el.value);
     if(k==='payday')v=clampDay(el.value);
