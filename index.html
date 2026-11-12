@@ -145,6 +145,7 @@ main{display:flex;flex-direction:column;gap:14px}
 .day-items .row{padding:8px 0;border-bottom:1px dashed var(--line)}
 .day-items li:last-child .row{border-bottom:0}
 
+#ledger{scroll-margin-top:calc(84px + env(safe-area-inset-top,0px))}
 .day{scroll-margin-top:calc(100px + env(safe-area-inset-top,0px));border-radius:10px;transition:background .3s}
 .day.flash{background:var(--accent-soft)}
 
@@ -167,6 +168,13 @@ main{display:flex;flex-direction:column;gap:14px}
 .cats{display:flex;flex-direction:column;gap:9px}
 .cat-row{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;font-size:13px}
 .cat-row .bar{height:6px}
+button.cat-row{width:100%;min-height:36px;margin:-4px 0;padding:4px 8px;border:0;border-radius:10px;background:none;color:inherit;font:inherit;font-size:13px;text-align:left}
+button.cat-row[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.cats.has-pick button.cat-row[aria-pressed="false"]{opacity:.55}
+.filter-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-2px 0 12px;padding:9px 12px;border-radius:12px;background:var(--accent-soft);color:var(--accent);font-size:13px}
+.filter-bar b{font-weight:700}
+.filter-bar .mini{height:30px;color:var(--accent);border-color:var(--accent)}
+.day-sum .of{font-size:12px;color:var(--muted);font-weight:400}
 
 /* fixed costs */
 .fx{border-bottom:1px solid var(--line);padding:12px 0;display:flex;flex-direction:column;gap:10px}
@@ -296,6 +304,7 @@ let S={settings:null,months:{}};
 let drafts={};
 let ready=false, loadProblem=false;
 let view='today', curKey=null;
+let expCat=null; // 지출 내역 장부를 이 분류만 보여 줌 (null = 전체)
 
 function startDay(){return Math.min(28,Math.max(1,Number(S.settings?.startDay)||1))}
 function period(key){
@@ -551,18 +560,36 @@ function viewExp(){
       <div class="bar ${over?'over':''}"><i style="width:${C.budget?Math.min(100,C.spent/C.budget*100):0}%"></i></div>
       <div class="spend-row"><span>하루 평균</span><span><b>${won(C.elapsed?C.spent/C.elapsed:0)}원</b> (예산 ${won(C.daily)}원)</span></div>
     </div></section>`;
-  const byCat={};M.exp.forEach(x=>{const c=x.c||'기타';byCat[c]=(byCat[c]||0)+x.a});
+  const catOf=x=>x.c||'기타';
+  const byCat={};M.exp.forEach(x=>{const c=catOf(x);byCat[c]=(byCat[c]||0)+x.a});
   const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  if(expCat&&!byCat[expCat])expCat=null;
   if(cats.length){
     const max=cats[0][1]||1;
-    h+=`<section class="card"><h2>분류별</h2><div class="cats">`+cats.map(([c,v])=>`<div class="cat-row"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></div>`).join('')+`</div></section>`;
+    h+=`<section class="card"><h2>분류별 <small>누르면 그 분류만 장부에 보여요</small></h2><div class="cats ${expCat?'has-pick':''}">`+cats.map(([c,v])=>`<button type="button" class="cat-row" data-act="cat-filter" data-cat="${esc(c)}" aria-pressed="${c===expCat}"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></button>`).join('')+`</div></section>`;
+  }
+  if(expCat){
+    const picked=M.exp.filter(x=>catOf(x)===expCat);
+    const list=[...new Set(picked.map(x=>x.d))].sort().reverse();
+    h+=`<section class="card" id="ledger"><h2>날짜별 장부 <small>${esc(expCat)}만 보기</small></h2>
+      <div class="filter-bar"><span><b>${esc(expCat)}</b> ${picked.length}건 · ${won(byCat[expCat])}원</span><button type="button" class="mini" data-act="cat-filter" data-cat="">전체 보기</button></div>`;
+    h+=list.map(ds=>{
+      const d=parseYmd(ds);const items=picked.filter(x=>x.d===ds);const s=sum(items.map(x=>x.a));
+      const all=sum(M.exp.filter(x=>x.d===ds).map(x=>x.a));
+      return `<div class="day ${ds===C.tS?'is-today':''}" data-date="${ds}">
+        <div class="day-h"><div class="day-d ${d.getDay()===0?'sun':''}"><b>${d.getDate()}</b><span>${d.getMonth()+1}월 ${WD[d.getDay()]}</span></div>
+        <div class="day-mid"><div class="day-sum"><b>${won(s)}원</b><span class="of">그날 전체 ${won(all)}원</span></div></div></div>
+        <ul class="day-items">${items.map(x=>expRow(x,curKey)).join('')}</ul>
+      </div>`;
+    }).join('');
+    return h+`</section>`;
   }
   const t=todayDate();
   const last=C.state==='current'?t:C.state==='past'?P.end:null;
   const dates=new Set(M.exp.map(x=>x.d));
   if(last){for(let d=new Date(last);d>=P.start;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()-1))dates.add(ymd(d));}
   const list=[...dates].sort().reverse();
-  h+=`<section class="card"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
+  h+=`<section class="card" id="ledger"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
   if(!list.length)h+=`<p class="empty">아직 시작 전인 달이에요.</p>`;
   h+=list.map(ds=>{
     const d=parseYmd(ds);const items=M.exp.filter(x=>x.d===ds);const s=sum(items.map(x=>x.a));
@@ -802,7 +829,12 @@ document.addEventListener('click',e=>{
       const inp=document.getElementById('act-'+id);const n=inp?parseNum(inp.value):null;
       mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n??f.est;});
       toast(n==null?'예상 금액으로 확정했어요.':`${won(n)}원으로 확정했어요.`);break;}
+    case 'cat-filter':{
+      const c=b.dataset.cat||null;expCat=c===expCat?null:c;render();
+      if(expCat){const el=$('#ledger');if(el)el.scrollIntoView({block:'start'});}
+      break;}
     case 'cal-day':{
+      if(expCat){expCat=null;render();}
       const el=document.querySelector(`.day[data-date="${b.dataset.date}"]`);if(!el)break;
       el.scrollIntoView({block:'start'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1300);break;}
@@ -818,8 +850,8 @@ document.addEventListener('click',e=>{
   }
 });
 $('#fab').addEventListener('click',()=>openExpense(curKey,null));
-$('#prevM').addEventListener('click',()=>{curKey=keyAdd(curKey,-1);render();});
-$('#nextM').addEventListener('click',()=>{curKey=keyAdd(curKey,1);render();});
+$('#prevM').addEventListener('click',()=>{curKey=keyAdd(curKey,-1);expCat=null;render();});
+$('#nextM').addEventListener('click',()=>{curKey=keyAdd(curKey,1);expCat=null;render();});
 
 // live comma formatting
 document.addEventListener('input',e=>{
