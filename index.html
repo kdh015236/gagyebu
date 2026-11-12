@@ -353,7 +353,7 @@ function calc(key){
   const cum=state==='current'?daily*elapsed-(spentBefore+todaySpent):budget-spent;
   const recommend=daysLeftIncl?Math.max(0,Math.floor((budget-spentBefore)/daysLeftIncl/100)*100):0;
   return{M,P,income,fixedEff,fixedEst,confirmed,fixedCount:M.fixed.length,daily,days,budget,spent,state,elapsed,
-    todaySpent,daysLeftIncl,cum,recommend,plannedLeft:income-fixedEff-budget,expectedLeft:income-fixedEff-projected,tS};
+    todaySpent,daysLeftIncl,cum,recommend,projected,plannedLeft:income-fixedEff-budget,expectedLeft:income-fixedEff-projected,tS};
 }
 function fixedDate(P,day){
   if(!day)return null;
@@ -450,20 +450,24 @@ function setSync(s){
 /* ---------- views ---------- */
 function flowCard(C){
   const over=C.spent>C.budget;
-  const label=C.state==='past'?'월말 실제 잔액':C.state==='future'?'예상 잔액':'지금 추세면 월말 잔액';
+  // 생활비 = 지출 내역에 기록된 돈 + 앞으로 쓸 하루 생활비(오늘 남은 한도 + 내일부터 하루 예산 × 남은 날)
+  const rest=Math.max(0,C.projected-C.spent);
+  const livSub=C.state==='past'?'이 달 쓴 돈':
+    C.state==='future'?`하루 ${won(C.daily)} × ${C.days}일`:
+    `쓴 돈 ${won(C.spent)} + 앞으로 ${won(rest)}`;
+  const endSub=C.state==='past'?'실제':'예상';
   return `<section class="card">
     <h2>이번 달 흐름 <small>${C.P.days}일 기준</small></h2>
     <dl class="ledger">
       <div><dt>수입</dt><dd>${won(C.income)}</dd></div>
       <div><dt>고정비 <span class="tag ${C.confirmed<C.fixedCount?'warn':'ok'}">확정 ${C.confirmed}/${C.fixedCount}</span></dt><dd>−${won(C.fixedEff)}</dd></div>
-      <div><dt>생활비 예산 <span class="sub">하루 ${won(C.daily)} × ${C.days}일</span></dt><dd>−${won(C.budget)}</dd></div>
-      <div class="total"><dt>계획 잔액</dt><dd class="${C.plannedLeft<0?'bad':''}">${won(C.plannedLeft)}</dd></div>
+      <div><dt>생활비 <span class="sub">${livSub}</span></dt><dd>−${won(C.projected)}</dd></div>
+      <div class="total"><dt>월말 잔액 <span class="sub">${endSub}</span></dt><dd class="${C.expectedLeft<0?'bad':''}">${won(C.expectedLeft)}</dd></div>
     </dl>
     <div class="spend">
       <div class="spend-row"><span>생활비 사용</span><span><b>${won(C.spent)}</b> / ${won(C.budget)}</span></div>
       <div class="bar ${over?'over':''}"><i style="width:${C.budget?Math.min(100,C.spent/C.budget*100):0}%"></i></div>
     </div>
-    <div class="proj"><span>${label}</span><b class="${C.expectedLeft<0?'bad':''}">${won(C.expectedLeft)}원</b></div>
   </section>`;
 }
 function expRow(x,key){
