@@ -145,7 +145,6 @@ main{display:flex;flex-direction:column;gap:14px}
 .day-items .row{padding:8px 0;border-bottom:1px dashed var(--line)}
 .day-items li:last-child .row{border-bottom:0}
 
-#ledger{scroll-margin-top:calc(84px + env(safe-area-inset-top,0px))}
 .day{scroll-margin-top:calc(100px + env(safe-area-inset-top,0px));border-radius:10px;transition:background .3s}
 .day.flash{background:var(--accent-soft)}
 
@@ -161,20 +160,19 @@ main{display:flex;flex-direction:column;gap:14px}
 .cal-c.future{background:none;border:1px dashed var(--line)} .cal-c.future b{color:var(--muted);font-weight:500}
 .cal-c.today{box-shadow:inset 0 0 0 2px var(--accent)}
 .cal-c.blank{visibility:hidden}
-.cal-sum{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px;font-size:13px;color:var(--muted);align-items:center}
-.cal-sum b{color:var(--ink)}
+.cal-sum{margin:12px 0 0;font-size:14px}
+.cal-sum>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 0}
+.cal-sum dt{color:var(--muted)}
+.cal-sum dd{margin:0;display:flex;gap:10px;align-items:baseline;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cal-sum dd span{color:var(--muted);font-size:13px}
+.cal-sum b{font-weight:700;color:var(--ink)} .cal-sum b.good{color:var(--good)} .cal-sum b.bad{color:var(--bad)}
+.cal-sum .total{border-top:1px solid var(--line);margin-top:2px;padding-top:9px}
+.cal-sum .total dt{color:var(--ink);font-weight:600}
 .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .sw.ok{background:var(--good)} .sw.over{background:var(--bad)}
 .cats{display:flex;flex-direction:column;gap:9px}
 .cat-row{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;font-size:13px}
 .cat-row .bar{height:6px}
-button.cat-row{width:100%;min-height:36px;margin:-4px 0;padding:4px 8px;border:0;border-radius:10px;background:none;color:inherit;font:inherit;font-size:13px;text-align:left}
-button.cat-row[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
-.cats.has-pick button.cat-row[aria-pressed="false"]{opacity:.55}
-.filter-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-2px 0 12px;padding:9px 12px;border-radius:12px;background:var(--accent-soft);color:var(--accent);font-size:13px}
-.filter-bar b{font-weight:700}
-.filter-bar .mini{height:30px;color:var(--accent);border-color:var(--accent)}
-.day-sum .of{font-size:12px;color:var(--muted);font-weight:400}
 
 /* fixed costs */
 .fx{border-bottom:1px solid var(--line);padding:12px 0;display:flex;flex-direction:column;gap:10px}
@@ -304,7 +302,6 @@ let S={settings:null,months:{}};
 let drafts={};
 let ready=false, loadProblem=false;
 let view='today', curKey=null;
-let expCat=null; // 지출 내역 장부를 이 분류만 보여 줌 (null = 전체)
 
 function startDay(){return Math.min(28,Math.max(1,Number(S.settings?.startDay)||1))}
 function period(key){
@@ -459,19 +456,16 @@ function setSync(s){
 /* ---------- views ---------- */
 function flowCard(C){
   const over=C.spent>C.budget;
-  // 생활비 = 지출 내역에 기록된 돈 + 앞으로 쓸 하루 생활비(오늘 남은 한도 + 내일부터 하루 예산 × 남은 날)
-  const rest=Math.max(0,C.projected-C.spent);
-  const livSub=C.state==='past'?'이 달 쓴 돈':
-    C.state==='future'?`하루 ${won(C.daily)} × ${C.days}일`:
-    `쓴 돈 ${won(C.spent)} + 앞으로 ${won(rest)}`;
-  const endSub=C.state==='past'?'실제':'예상';
+  // 생활비 = 지출 내역에 기록된 돈만 (앞으로 쓸 돈은 넣지 않음, 2026-11-26 사용자 요청)
+  const left=C.income-C.fixedEff-C.spent;
+  const livSub=C.state==='past'?'이 달 쓴 돈':C.state==='future'?'시작 전':'지금까지 쓴 돈';
   return `<section class="card">
     <h2>이번 달 흐름 <small>${C.P.days}일 기준</small></h2>
     <dl class="ledger">
       <div><dt>수입</dt><dd>${won(C.income)}</dd></div>
       <div><dt>고정비 <span class="tag ${C.confirmed<C.fixedCount?'warn':'ok'}">확정 ${C.confirmed}/${C.fixedCount}</span></dt><dd>−${won(C.fixedEff)}</dd></div>
-      <div><dt>생활비 <span class="sub">${livSub}</span></dt><dd>−${won(C.projected)}</dd></div>
-      <div class="total"><dt>월말 잔액 <span class="sub">${endSub}</span></dt><dd class="${C.expectedLeft<0?'bad':''}">${won(C.expectedLeft)}</dd></div>
+      <div><dt>생활비 <span class="sub">${livSub}</span></dt><dd>−${won(C.spent)}</dd></div>
+      <div class="total"><dt>잔액</dt><dd class="${left<0?'bad':''}">${won(left)}</dd></div>
     </dl>
     <div class="spend">
       <div class="spend-row"><span>생활비 사용</span><span><b>${won(C.spent)}</b> / ${won(C.budget)}</span></div>
@@ -535,21 +529,24 @@ function calendarCard(C){
   const M=C.M,P=C.P;const byDay={};M.exp.forEach(x=>{byDay[x.d]=(byDay[x.d]||0)+x.a});
   let cells=[...WD].map((w,i)=>`<div class="cal-wd ${i===0?'sun':''}">${w}</div>`).join('');
   for(let i=0;i<P.start.getDay();i++)cells+='<div class="cal-c blank" aria-hidden="true"></div>';
-  let okN=0,overN=0,net=0;
+  let okN=0,overN=0,okSum=0,overSum=0;
   for(let i=0;i<P.days;i++){
     const d=new Date(P.start.getFullYear(),P.start.getMonth(),P.start.getDate()+i);const ds=ymd(d);
     const s=byDay[ds]||0;const label=(i===0||d.getDate()===1)&&startDay()>1?`${d.getMonth()+1}/${d.getDate()}`:d.getDate();
     if(ds>C.tS){cells+=`<div class="cal-c future"><b>${label}</b><span></span></div>`;continue;}
-    const diff=C.daily-s;if(diff>=0)okN++;else overN++;net+=diff;
+    const diff=C.daily-s;if(diff>=0){okN++;okSum+=diff}else{overN++;overSum-=diff}
     const say=diff>=0?`${won(diff)}원 덜 씀`:`${won(-diff)}원 초과`;
     cells+=`<button type="button" class="cal-c ${diff>=0?'ok':'over'} ${ds===C.tS?'today':''}" data-act="cal-day" data-date="${ds}" aria-label="${d.getMonth()+1}월 ${d.getDate()}일, ${won(s)}원 사용, ${say}"><b>${label}</b><span>${diff>0?'+':diff<0?'−':''}${short(diff)}</span></button>`;
   }
-  const counted=okN+overN;
+  const counted=okN+overN;const net=okSum-overSum;
   return `<section class="card"><h2>하루 예산 달력 <small>하루 ${won(C.daily)}원</small></h2>
     <div class="cal">${cells}</div>
-    ${counted?`<div class="cal-sum"><span><i class="sw ok"></i>덜 쓴 날 <b>${okN}일</b></span><span><i class="sw over"></i>초과한 날 <b>${overN}일</b></span><span>합계 <b class="${net>=0?'good':'bad'}">${net>=0?'+':'−'}${won(Math.abs(net))}원</b></span></div>`
+    ${counted?`<dl class="cal-sum">
+      <div><dt><i class="sw ok"></i>덜 쓴 날</dt><dd><span>${okN}일</span><b class="good">+${won(okSum)}원</b></dd></div>
+      <div><dt><i class="sw over"></i>초과한 날</dt><dd><span>${overN}일</span><b class="${overSum?'bad':''}">${overSum?'−':''}${won(overSum)}원</b></dd></div>
+      <div class="total"><dt>합계</dt><dd><b class="${net>=0?'good':'bad'}">${net>0?'+':net<0?'−':''}${won(Math.abs(net))}원</b></dd></div>
+    </dl>`
       :`<p class="hint" style="margin-top:10px">이 달이 시작되면 날마다 남긴 돈과 초과한 돈이 표시돼요.</p>`}
-    <p class="hint" style="margin-top:6px">+는 하루 예산보다 덜 쓴 금액, −는 초과한 금액이에요. 날짜를 누르면 그날 내역으로 이동해요.</p>
   </section>`;
 }
 function viewExp(){
@@ -560,36 +557,18 @@ function viewExp(){
       <div class="bar ${over?'over':''}"><i style="width:${C.budget?Math.min(100,C.spent/C.budget*100):0}%"></i></div>
       <div class="spend-row"><span>하루 평균</span><span><b>${won(C.elapsed?C.spent/C.elapsed:0)}원</b> (예산 ${won(C.daily)}원)</span></div>
     </div></section>`;
-  const catOf=x=>x.c||'기타';
-  const byCat={};M.exp.forEach(x=>{const c=catOf(x);byCat[c]=(byCat[c]||0)+x.a});
+  const byCat={};M.exp.forEach(x=>{const c=x.c||'기타';byCat[c]=(byCat[c]||0)+x.a});
   const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
-  if(expCat&&!byCat[expCat])expCat=null;
   if(cats.length){
     const max=cats[0][1]||1;
-    h+=`<section class="card"><h2>분류별 <small>누르면 그 분류만 장부에 보여요</small></h2><div class="cats ${expCat?'has-pick':''}">`+cats.map(([c,v])=>`<button type="button" class="cat-row" data-act="cat-filter" data-cat="${esc(c)}" aria-pressed="${c===expCat}"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></button>`).join('')+`</div></section>`;
-  }
-  if(expCat){
-    const picked=M.exp.filter(x=>catOf(x)===expCat);
-    const list=[...new Set(picked.map(x=>x.d))].sort().reverse();
-    h+=`<section class="card" id="ledger"><h2>날짜별 장부 <small>${esc(expCat)}만 보기</small></h2>
-      <div class="filter-bar"><span><b>${esc(expCat)}</b> ${picked.length}건 · ${won(byCat[expCat])}원</span><button type="button" class="mini" data-act="cat-filter" data-cat="">전체 보기</button></div>`;
-    h+=list.map(ds=>{
-      const d=parseYmd(ds);const items=picked.filter(x=>x.d===ds);const s=sum(items.map(x=>x.a));
-      const all=sum(M.exp.filter(x=>x.d===ds).map(x=>x.a));
-      return `<div class="day ${ds===C.tS?'is-today':''}" data-date="${ds}">
-        <div class="day-h"><div class="day-d ${d.getDay()===0?'sun':''}"><b>${d.getDate()}</b><span>${d.getMonth()+1}월 ${WD[d.getDay()]}</span></div>
-        <div class="day-mid"><div class="day-sum"><b>${won(s)}원</b><span class="of">그날 전체 ${won(all)}원</span></div></div></div>
-        <ul class="day-items">${items.map(x=>expRow(x,curKey)).join('')}</ul>
-      </div>`;
-    }).join('');
-    return h+`</section>`;
+    h+=`<section class="card"><h2>분류별</h2><div class="cats">`+cats.map(([c,v])=>`<div class="cat-row"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></div>`).join('')+`</div></section>`;
   }
   const t=todayDate();
   const last=C.state==='current'?t:C.state==='past'?P.end:null;
   const dates=new Set(M.exp.map(x=>x.d));
   if(last){for(let d=new Date(last);d>=P.start;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()-1))dates.add(ymd(d));}
   const list=[...dates].sort().reverse();
-  h+=`<section class="card" id="ledger"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
+  h+=`<section class="card"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
   if(!list.length)h+=`<p class="empty">아직 시작 전인 달이에요.</p>`;
   h+=list.map(ds=>{
     const d=parseYmd(ds);const items=M.exp.filter(x=>x.d===ds);const s=sum(items.map(x=>x.a));
@@ -829,12 +808,7 @@ document.addEventListener('click',e=>{
       const inp=document.getElementById('act-'+id);const n=inp?parseNum(inp.value):null;
       mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n??f.est;});
       toast(n==null?'예상 금액으로 확정했어요.':`${won(n)}원으로 확정했어요.`);break;}
-    case 'cat-filter':{
-      const c=b.dataset.cat||null;expCat=c===expCat?null:c;render();
-      if(expCat){const el=$('#ledger');if(el)el.scrollIntoView({block:'start'});}
-      break;}
     case 'cal-day':{
-      if(expCat){expCat=null;render();}
       const el=document.querySelector(`.day[data-date="${b.dataset.date}"]`);if(!el)break;
       el.scrollIntoView({block:'start'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1300);break;}
@@ -850,8 +824,8 @@ document.addEventListener('click',e=>{
   }
 });
 $('#fab').addEventListener('click',()=>openExpense(curKey,null));
-$('#prevM').addEventListener('click',()=>{curKey=keyAdd(curKey,-1);expCat=null;render();});
-$('#nextM').addEventListener('click',()=>{curKey=keyAdd(curKey,1);expCat=null;render();});
+$('#prevM').addEventListener('click',()=>{curKey=keyAdd(curKey,-1);render();});
+$('#nextM').addEventListener('click',()=>{curKey=keyAdd(curKey,1);render();});
 
 // live comma formatting
 document.addEventListener('input',e=>{
