@@ -170,8 +170,18 @@ main{display:flex;flex-direction:column;gap:14px}
 .cal-sum .total dt{color:var(--ink);font-weight:600}
 .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .sw.ok{background:var(--good)} .sw.over{background:var(--bad)}
-.cats{display:flex;flex-direction:column;gap:9px}
+.cats{display:flex;flex-direction:column;gap:2px}
 .cat-row{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;font-size:13px}
+button.cat-row{width:calc(100% + 16px);margin:0 -8px;padding:7px 8px;border:0;border-radius:8px;background:none;color:inherit;font-family:inherit;text-align:left;cursor:pointer}
+button.cat-row[aria-pressed="true"]{background:var(--accent-soft)}
+button.cat-row[aria-pressed="true"] span{font-weight:700}
+.cats.has-sel button.cat-row[aria-pressed="false"]{opacity:.45}
+#ledger{scroll-margin-top:calc(100px + env(safe-area-inset-top,0px))}
+.filter-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-soft);border-radius:10px;padding:7px 7px 7px 12px;margin-bottom:12px;font-size:14px}
+.filter-bar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filter-bar button{flex:none;border:0;background:var(--surface);color:var(--accent);border-radius:99px;padding:6px 12px;font-family:inherit;font-size:13px;font-weight:600}
+.row{scroll-margin-top:calc(110px + env(safe-area-inset-top,0px));transition:background .3s}
+.row.flash{background:var(--accent-soft);border-radius:8px}
 .cat-row .bar{height:6px}
 
 /* fixed costs */
@@ -302,6 +312,7 @@ let S={settings:null,months:{}};
 let drafts={};
 let ready=false, loadProblem=false;
 let view='today', curKey=null;
+let expCat=null; // 지출 내역: 분류별에서 고른 분류(장부 필터), null이면 전체
 
 function startDay(){return Math.min(28,Math.max(1,Number(S.settings?.startDay)||1))}
 function period(key){
@@ -559,25 +570,35 @@ function viewExp(){
     </div></section>`;
   const byCat={};M.exp.forEach(x=>{const c=x.c||'기타';byCat[c]=(byCat[c]||0)+x.a});
   const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const catOf=x=>x.c||'기타';
+  if(expCat&&!byCat[expCat])expCat=null; // 그 달에 없는 분류면 필터 해제
   if(cats.length){
     const max=cats[0][1]||1;
-    h+=`<section class="card"><h2>분류별</h2><div class="cats">`+cats.map(([c,v])=>`<div class="cat-row"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></div>`).join('')+`</div></section>`;
+    h+=`<section class="card"><h2>분류별 <small>누르면 장부에서 골라 보기</small></h2><div class="cats ${expCat?'has-sel':''}">`+cats.map(([c,v])=>`<button type="button" class="cat-row" data-act="cat-filter" data-cat="${esc(c)}" aria-pressed="${c===expCat}"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b>${won(v)}</b></button>`).join('')+`</div></section>`;
   }
   const t=todayDate();
   const last=C.state==='current'?t:C.state==='past'?P.end:null;
-  const dates=new Set(M.exp.map(x=>x.d));
-  if(last){for(let d=new Date(last);d>=P.start;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()-1))dates.add(ymd(d));}
+  const dates=new Set(M.exp.filter(x=>!expCat||catOf(x)===expCat).map(x=>x.d));
+  if(last&&!expCat){for(let d=new Date(last);d>=P.start;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()-1))dates.add(ymd(d));}
   const list=[...dates].sort().reverse();
-  h+=`<section class="card"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
+  h+=`<section class="card" id="ledger"><h2>날짜별 장부 <small>하루 예산 ${won(C.daily)}원</small></h2>`;
+  if(expCat){
+    const fx=M.exp.filter(x=>catOf(x)===expCat);
+    h+=`<div class="filter-bar"><span><b>${esc(expCat)}</b> ${fx.length}건 · ${won(sum(fx.map(x=>x.a)))}원</span><button type="button" data-act="cat-filter" data-cat="">전체 보기</button></div>`;
+  }
   if(!list.length)h+=`<p class="empty">아직 시작 전인 달이에요.</p>`;
   h+=list.map(ds=>{
-    const d=parseYmd(ds);const items=M.exp.filter(x=>x.d===ds);const s=sum(items.map(x=>x.a));
+    const d=parseYmd(ds);const all=M.exp.filter(x=>x.d===ds);const s=sum(all.map(x=>x.a));
+    const items=expCat?all.filter(x=>catOf(x)===expCat):all;
     const diff=C.daily-s;const isFuture=ds>C.tS;
     const pct=C.daily?Math.min(100,s/C.daily*100):(s?100:0);
     const status=isFuture?'<span class="muted">예정</span>':diff>=0?`<span class="good">${won(diff)} 남김</span>`:`<span class="bad">${won(-diff)} 초과</span>`;
+    const head=expCat
+      ?`<div class="day-sum"><b>${esc(expCat)} ${won(sum(items.map(x=>x.a)))}원</b><span class="muted">그날 전체 ${won(s)}원</span></div>`
+      :`<div class="day-sum"><b>${all.length?won(s)+'원':'지출 없음'}</b>${status}</div><div class="bar ${diff<0?'over':''}"><i style="width:${pct}%"></i></div>`;
     return `<div class="day ${ds===C.tS?'is-today':''} ${items.length?'':'quiet'}" data-date="${ds}">
       <div class="day-h"><div class="day-d ${d.getDay()===0?'sun':''}"><b>${d.getDate()}</b><span>${d.getMonth()+1}월 ${WD[d.getDay()]}</span></div>
-      <div class="day-mid"><div class="day-sum"><b>${items.length?won(s)+'원':'지출 없음'}</b>${status}</div><div class="bar ${diff<0?'over':''}"><i style="width:${pct}%"></i></div></div></div>
+      <div class="day-mid">${head}</div></div>
       ${items.length?`<ul class="day-items">${items.map(x=>expRow(x,curKey)).join('')}</ul>`:''}
     </div>`;
   }).join('');
@@ -690,6 +711,7 @@ function render(){
   $('#mLabel').textContent=`${y}년 ${m}월`;
   $('#mRange').textContent=`${P.start.getMonth()+1}.${P.start.getDate()} – ${P.end.getMonth()+1}.${P.end.getDate()} · ${P.days}일${curKey===keyFor(todayDate())?' · 이번 달':''}`;
   const scrollY=window.scrollY;
+  main.style.paddingBottom='';
   main.innerHTML=view==='today'?viewToday():view==='exp'?viewExp():view==='plan'?viewPlan():viewSet();
   window.scrollTo(0,scrollY);
   tabs.hidden=false;
@@ -731,9 +753,28 @@ function openExpense(key,id){
       if(x&&newKey!==key)mutateMonth(key,M=>{M.exp=M.exp.filter(e=>e.id!==x.id)});
       mutateMonth(newKey,M=>{const i=M.exp.findIndex(e=>e.id===item.id);if(i>=0)M.exp[i]=item;else M.exp.push(item);M.exp.sort((p,q)=>p.d<q.d?-1:p.d>q.d?1:0)});
       closeSheet();toast(x?'수정했어요.':`${won(a)}원 기록했어요.`);
+      if(!x)showSaved(item,newKey);
     });
   form.querySelector('#eCats').addEventListener('click',e=>{const b=e.target.closest('[data-cat]');if(!b)return;cat=b.dataset.cat;form.querySelectorAll('#eCats .chip-btn').forEach(c=>c.setAttribute('aria-pressed',c===b));});
   form._del=()=>{mutateMonth(key,M=>{M.exp=M.exp.filter(e=>e.id!==id)});closeSheet();toast('삭제했어요.');};
+}
+// 새로 기록한 지출을 화면 맨 위로 올리고 잠깐 강조 (2026-11-26 사용자 요청)
+function showSaved(item,key){
+  if(view==='exp'){
+    let re=false;
+    if(key!==curKey){curKey=key;re=true;}
+    if(expCat&&expCat!==(item.c||'기타')){expCat=null;re=true;}
+    if(re)render();
+  }
+  const row=$('#main').querySelector(`.row[data-act="edit-exp"][data-id="${item.id}"]`);if(!row)return;
+  const day=view==='exp'?row.closest('.day'):null;const target=day||row;
+  // 페이지 끝 근처라 맨 위까지 못 올라가면 아래에 빈 공간을 잠깐 덧붙임 (다음 render 때 원래대로)
+  const main=$('#main');const margin=parseFloat(getComputedStyle(target).scrollMarginTop)||0;
+  const need=target.getBoundingClientRect().top+window.scrollY-margin+window.innerHeight-document.documentElement.scrollHeight;
+  if(need>0)main.style.paddingBottom=(parseFloat(getComputedStyle(main).paddingBottom)+need)+'px';
+  target.scrollIntoView({block:'start'});
+  if(day&&row.getBoundingClientRect().bottom>window.innerHeight-90)row.scrollIntoView({block:'start'});
+  row.classList.add('flash');setTimeout(()=>row.classList.remove('flash'),1500);
 }
 function openIncome(id){
   const key=curKey;const M=getMonth(key);const x=id?M.income.find(i=>i.id===id):null;
@@ -808,7 +849,12 @@ document.addEventListener('click',e=>{
       const inp=document.getElementById('act-'+id);const n=inp?parseNum(inp.value):null;
       mutateMonth(curKey,M=>{const f=M.fixed.find(f=>f.id===id);if(f)f.act=n??f.est;});
       toast(n==null?'예상 금액으로 확정했어요.':`${won(n)}원으로 확정했어요.`);break;}
+    case 'cat-filter':{
+      const c=b.dataset.cat||null;expCat=(c&&c!==expCat)?c:null;render();
+      if(expCat)$('#ledger')?.scrollIntoView({block:'start'});
+      break;}
     case 'cal-day':{
+      if(expCat){expCat=null;render();}
       const el=document.querySelector(`.day[data-date="${b.dataset.date}"]`);if(!el)break;
       el.scrollIntoView({block:'start'});
       el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1300);break;}
